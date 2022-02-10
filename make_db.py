@@ -1,20 +1,20 @@
+from os import remove
+from re import I
 import sqlite3
 import codecs
+from numpy import append
+import pygame,pygame.freetype,pygame.gfxdraw
 import pygame,pygame.freetype,pygame.gfxdraw
 import sys, traceback
-from pygame.locals import K_ESCAPE
+#from pygame.locals import K_ESCAPE
 import math
 
 
 make_data = True
 #make_data = False
 
-
-
-
-
 def line_len(pt1,pt2):
-    return math.sqrt( pow(pt1[0]-pt2[0],2) + pow(pt1[1]-pt2[1],2))
+    return round(math.sqrt( pow(pt1[0]-pt2[0],2) + pow(pt1[1]-pt2[1],2)),3)
 
 #######################################################################################
 #
@@ -43,7 +43,7 @@ try:
         con.commit()
 
         count = 0
-        with codecs.open('map.txt', encoding='utf-8') as f:
+        with codecs.open('map2.txt', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
 
@@ -90,8 +90,8 @@ try:
     graph = [] 
 
     # 5/5
-    HOUSE_DENSITY = 1
-    TRESHOLD = 1.5
+    HOUSE_DENSITY = 5
+    TRESHOLD = 5
   
     cur.execute("select count(distinct id) from coords;")
     rows = cur.fetchall()
@@ -113,7 +113,7 @@ try:
             l=line_len([segments[segment_idx-1][0],segments[segment_idx-1][1]],[segments[segment_idx][0],segments[segment_idx][1]])
             
             # вычисляем, сколько у нас влезает "домов" на этот сегмент
-            house_per_segment = (int)(l // HOUSE_DENSITY)
+            house_per_segment = (int)(l / HOUSE_DENSITY)
             
             for sub in range(1,house_per_segment+1):
                 # находим координты этого дома
@@ -143,16 +143,16 @@ try:
     #######################################################################################
 
     for g in graph:
-        
         n = nodes[g["start"]]
-        d = n["con"].keys() 
-        if not(g["end"] in d):
+        k = n["con"].keys() 
+        if not(g["end"] in k):
             n["con"][g["end"]] = g["len"]
 
         n = nodes[g["end"]]
-        d = n["con"].keys() 
-        if not(g["start"] in d):
+        k = n["con"].keys() 
+        if not(g["start"] in k):
             n["con"][g["start"]] = g["len"]
+    del n,k,g
 
     #######################################################################################
     #
@@ -164,42 +164,31 @@ try:
             if (((g["start"]==i) and (g["end"]==j)) or ((g["start"]==j) and (g["end"]==i))):
                 return True
         return False
+
     
     for ns in range(len(nodes)):
         for nd in range(len(nodes)):
             # если разные улицы
             if (nodes[ns]["street"] != nodes[nd]["street"]):
+                # если длина подходит
                 l = line_len(nodes[ns]["pos"],nodes[nd]["pos"]) 
                 if l<=TRESHOLD:
-                    print("Connect {}-{}".format(ns,nd))   
-                    graph.append({"start":ns,"end":nd,"len":l,"type":1})   
+                    # print("- connect {}-{}, len: {}".format(ns,nd,l))   
+                    k = nodes[ns]["con"].keys() 
+                    if not(nd in k):
+                        nodes[ns]["con"][nd] = l
+                    k = nodes[nd]["con"].keys() 
+                    if not(ns in k):
+                        nodes[nd]["con"][ns] = l
+                    if not graph_exists(graph,ns,nd):
+                        graph.append({"start":ns,"end":nd,"len":l,"type":1})   
 
     print('Добавлено графов: {}'.format(len(graph)-graph_count))
-    del graph_count
+    del graph_count,k,ns,nd,l
     
-    """
-    проверяем каждую точку улицы на близость со всеми точками со всех других улиц
-    если расстояние позволяет - делаем граф между ними
-    """
-    
-    """
-    for ns in range(len(nodes)):
-        for nd in range(len(nodes)):
-            # если разные улицы
-            if (nodes[ns]["street"] != nodes[nd]["street"]):
-                l = line_len(nodes[ns]["pos"],nodes[nd]["pos"]) 
-                if ((l<=TRESHOLD) and (not graph_exists(graph,ns,nd))):
-                    print("Connect {}-{}".format(ns,nd))   
-                    graph.append({"start":ns,"end":nd,"len":l,"type":1})   
-
-    print('Добавлено графов: {}'.format(len(graph)-graph_count))
-    del graph_count
-    """
-
-
-    W = 1300
-    H = 980
-    MARGIN = 10
+    W = 1000
+    H = 700
+    MARGIN = 50
 
     # calculate map map borders
     minx = maxx = nodes[0]["pos"][0]
@@ -238,54 +227,67 @@ try:
         y += miny
         return [x,y]
 
-    """
-    function reconstruct_path(cameFrom, current)
-    total_path := {current}
-    while current in cameFrom.Keys:
-        current := cameFrom[current]
-        total_path.prepend(current)
-    return total_path
-
-
+    
+    def reconstruct_path(cameFrom, current):
+        total_path = [current]
+        while current in cameFrom.keys():
+            current = cameFrom[current]
+            total_path.append(current)
+        return total_path
+    
     # h is the heuristic function. h(n) estimates the cost to reach goal from node n.
-    def A_Star(start, goal, h):
+    def A_Star(start, goal):
+        global nodes
+
         openSet = [start]
-        cameFrom = []
+        cameFrom = {}
 
-    // For node n, gScore[n] is the cost of the cheapest path from start to n currently known.
-    gScore := map with default value of Infinity
-    gScore[start] := 0
+        # For node n, gScore[n] is the cost of the cheapest path from start to n currently known.
+        gScore = []
+        fScore = []
+        # For node n, fScore[n] = gScore[n] + h(n). fScore[n] represents our current best guess as to
+        # how short a path from start to finish can be if it goes through n.
+        
+        for i in range(len(nodes)):
+            gScore.append(float('inf'))  
+            fScore.append(float('inf'))    
+        
+        gScore[start] = 0
+        fScore[start] = line_len( nodes[start]["pos"], nodes[goal]["pos"])
 
-    // For node n, fScore[n] := gScore[n] + h(n). fScore[n] represents our current best guess as to
-    // how short a path from start to finish can be if it goes through n.
-    fScore := map with default value of Infinity
-    fScore[start] := h(start)
+        while len(openSet)>0:
+            # This operation can occur in O(1) time if openSet is a min-heap or a priority queue
+            #current = the node in openSet having the lowest fScore[] value
+            current = openSet[0]
+            min_val = fScore[current]
+            for i in openSet:
+                if fScore[current] < min_val:
+                    current = i
+                    min_val = fScore[current]
 
-    while openSet is not empty
-        // This operation can occur in O(1) time if openSet is a min-heap or a priority queue
-        current := the node in openSet having the lowest fScore[] value
-        if current = goal
-            return reconstruct_path(cameFrom, current)
+            
+            if current == goal:
+                return reconstruct_path(cameFrom, current)
 
-        openSet.Remove(current)
-        for each neighbor of current
-            // d(current,neighbor) is the weight of the edge from current to neighbor
-            // tentative_gScore is the distance from start to the neighbor through current
-            tentative_gScore := gScore[current] + d(current, neighbor)
-            if tentative_gScore < gScore[neighbor]
-                // This path to neighbor is better than any previous one. Record it!
-                cameFrom[neighbor] := current
-                gScore[neighbor] := tentative_gScore
-                fScore[neighbor] := tentative_gScore + h(neighbor)
-                if neighbor not in openSet
-                    openSet.add(neighbor)
+            openSet.remove(current)
+            for neighbor in nodes[current]["con"]:
+                # d(current,neighbor) is the weight of the edge from current to neighbor
+                # tentative_gScore is the distance from start to the neighbor through current
+                tentative_gScore = gScore[current] + nodes[current]["con"][neighbor]
+                if tentative_gScore < gScore[neighbor]:
+                    # This path to neighbor is better than any previous one. Record it!
+                    cameFrom[neighbor] = current
+                    gScore[neighbor] = tentative_gScore
+                    fScore[neighbor] = tentative_gScore + line_len( nodes[neighbor]["pos"], nodes[goal]["pos"]) 
+                    if neighbor not in openSet:
+                        openSet.append(neighbor)
 
-    // Open set is empty but goal was never reached
-    return failure
-    """
+        # Open set is empty but goal was never reached
+        return []
+    
     def get_nearest_node(x,y):
         global nodes
-        idx = -1
+        idx = 0
         min_len = line_len( nodes[0]["pos"],[x,y])
         for n in range(1,len(nodes)):
                 l = line_len( nodes[n]["pos"],[x,y])
@@ -301,13 +303,13 @@ try:
         path["end_geo"] = screen2geo(path["end_screen"])
         path["start_node"] = get_nearest_node(path["start_geo"][0],path["start_geo"][1])
         path["end_node"] = get_nearest_node(path["end_geo"][0],path["end_geo"][1])
-        A_Star(path["start_node"],path["end_node"])
+        path["nodes"] = A_Star(path["start_node"],path["end_node"])
 
 
     FPS = 10
     running = True
     clock = pygame.time.Clock()
-
+    
     CLR_BG = (0x14,0x1E,0x27)
     CLR_LINE = (0x004ee1)
     CLR_ADDED = (0xffff00)
@@ -315,6 +317,7 @@ try:
     CLR_PTS = (0x3bd200)
     CLR_PTE = (0xd20000)
     CLR_PATH = (0x3bd233)
+    CLR_FNT = (0xFF,0xFF,0x00)
 
     path = {
     "start_screen": [100,100],
@@ -325,15 +328,16 @@ try:
 
     try:
         pygame.init()
+        pygame.font.init() 
+        fnt = pygame.freetype.Font("app.ttf", 16)
         pygame.display.set_caption("Васька")
         surf_act = pygame.display.set_mode((W, H))
-        #fnt = pygame.freetype.Font(os.path.join(scriptpath, 'app.ttf'), 10)
-
+        
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT: sys.exit()
                 elif event.type == pygame.KEYDOWN: 
-                    if (event.key == K_ESCAPE):
+                    if (event.key == 27):
                         running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN: 
                     if (event.button == 1): 
@@ -356,9 +360,12 @@ try:
                 if (g["type"]==0): pygame.draw.line(surf_act,CLR_LINE , pt0, pt1, 1)
                 else :             pygame.draw.line(surf_act,CLR_ADDED, pt0, pt1, 1)
             # рисуем домики
+            i = 0
             for n in nodes:
                 pt = geo2screen( n["pos"] )
                 pygame.draw.circle(surf_act, CLR_POINTS, pt, 1, 0)
+                #fnt.render_to(surf_act, (pt[0]+15,pt[1]-15), str(i), CLR_FNT)
+                i += 1
             
             
             
@@ -370,7 +377,15 @@ try:
             path["end_screen"],
             geo2screen(nodes[path["end_node"]]["pos"]),
             1)
-
+            
+            # draw path
+            for i in range(len(path["nodes"])-1):
+                
+                pygame.draw.line(surf_act,CLR_PATH , 
+                geo2screen(nodes[ path["nodes"][i] ] ["pos"]),
+                geo2screen(nodes[ path["nodes"][i+1] ] ["pos"]),
+                 2)   
+            
             # start/end points                
             pygame.draw.circle(surf_act, CLR_PTS, path["start_screen"], 6, 0)
             pygame.draw.circle(surf_act, CLR_PTE, path["end_screen"], 6, 0)
