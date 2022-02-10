@@ -1,5 +1,4 @@
 from os import remove
-from re import I
 import sqlite3
 import codecs
 from numpy import append
