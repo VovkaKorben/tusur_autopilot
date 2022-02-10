@@ -170,7 +170,7 @@ try:
             # если разные улицы
             if (nodes[ns]["street"] != nodes[nd]["street"]):
                 l = line_len(nodes[ns]["pos"],nodes[nd]["pos"]) 
-                if ((l<=TRESHOLD) and (not graph_exists(graph,ns,nd))):
+                if l<=TRESHOLD:
                     print("Connect {}-{}".format(ns,nd))   
                     graph.append({"start":ns,"end":nd,"len":l,"type":1})   
 
